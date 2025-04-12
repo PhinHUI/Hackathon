@@ -15,10 +15,10 @@ if not os.getenv("PORTIA_API_KEY"):
 assert os.getenv("GOOGLE_APPLICATION_CREDENTIALS"), "GOOGLE_APPLICATION_CREDENTIALS not set"
 
 # Initialize Portia
+# Initialize Portia
 portia = Portia(
     config=default_config,
-    tools=example_tool_registry,
-    llm_provider="google_generative_ai"
+    tools=example_tool_registry
 )
 
 # Mock patient requests (replace with user input or API in production)
