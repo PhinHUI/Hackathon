@@ -1,27 +1,40 @@
 import os
 import datetime
 from dotenv import load_dotenv
-from portia import Portia, default_config, example_tool_registry
+from portia import (
+    Config,
+    LLMModel,
+    LLMProvider,
+    Portia,
+    InMemoryToolRegistry,
+    Tool,
+)
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+
+from ScheduleTool import ScheduleTool
 
 # Load environment variables
 load_dotenv()
 
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+
 # Verify API keys
-assert os.getenv("GOOGLE_API_KEY"), "GOOGLE_API_KEY is not set"
+assert GOOGLE_API_KEY, "GOOGLE_API_KEY is not set"
 if not os.getenv("PORTIA_API_KEY"):
     print("Warning: PORTIA_API_KEY not set, cloud features may be unavailable")
-assert os.getenv("GOOGLE_APPLICATION_CREDENTIALS"), "GOOGLE_APPLICATION_CREDENTIALS not set"
 
-# Initialize Portia
-# Initialize Portia
-portia = Portia(
-    config=default_config,
-    tools=example_tool_registry
+# Configure Portia with Google Gemini
+google_config = Config.from_default(
+    llm_provider=LLMProvider.GOOGLE_GENERATIVE_AI,
+    llm_model_name=LLMModel.GEMINI_2_0_FLASH,
+    google_api_key=GOOGLE_API_KEY
 )
 
-# Mock patient requests (replace with user input or API in production)
+# Initialize tool registry
+tool_registry = InMemoryToolRegistry()
+
+# Mock patient requests
 requests = [
     {"patient": "John Doe", "condition": "chest pain", "urgency": "urgent", "email": "john@example.com", "timestamp": "2025-04-12T08:00:00"},
     {"patient": "Jane Smith", "condition": "annual checkup", "urgency": "routine", "email": "jane@example.com", "timestamp": "2025-04-12T08:05:00"},
@@ -35,7 +48,7 @@ def prioritize_requests(requests):
         req["score"] = urgency_scores.get(req["urgency"], 1)
     return sorted(requests, key=lambda x: (x["score"], x["timestamp"]), reverse=True)
 
-# Mock calendar (replace with Google Calendar API in production)
+# Mock calendar
 calendar_slots = []
 def schedule_appointment(patient, urgency, condition):
     now = datetime.datetime.now()
@@ -63,11 +76,30 @@ def get_calendar_service():
     creds = flow.run_local_server(port=0)
     return build("calendar", "v3", credentials=creds)
 
-# Gmail API setup
+# Mock email function
 def send_email(to, subject, body):
-    # Simplified; use portia:google:gmail:send_email or Google API
     print(f"Mock email sent to {to}: Subject: {subject}, Body: {body}")
     return {"status": "sent"}
+
+# Custom scheduler tool
+def custom_scheduler(requests):
+    prioritized = prioritize_requests(requests)
+    appointments = []
+    for req in prioritized:
+        slot = schedule_appointment(req["patient"], req["urgency"], req["condition"])
+        appointments.append({
+            "patient": req["patient"],
+            "email": req["email"],
+            "slot": slot
+        })
+    return appointments
+
+tool = ScheduleTool()
+# Register custom tool
+tool_registry.register_tool(tool)
+
+# Initialize Portia
+portia = Portia(config=google_config, tools=tool_registry)
 
 # Plan to summarize and schedule
 plan = {
@@ -83,7 +115,7 @@ plan = {
             ],
             "tool_id": "llm_tool",
             "output": "$prioritized_requests",
-            "description": "Use LLM to confirm urgency scores align with medical context (e.g., chest pain is urgent)."
+            "description": "Use LLM to confirm urgency scores align with medical context."
         },
         {
             "task": "Schedule appointments for prioritized patients.",
@@ -112,26 +144,10 @@ plan = {
     ]
 }
 
-# Custom scheduler tool (mock)
-def custom_scheduler(requests):
-    prioritized = prioritize_requests(requests)
-    appointments = []
-    for req in prioritized:
-        slot = schedule_appointment(req["patient"], req["urgency"], req["condition"])
-        appointments.append({
-            "patient": req["patient"],
-            "email": req["email"],
-            "slot": slot
-        })
-    return appointments
-
-# Register custom tool (if needed)
-example_tool_registry["custom_scheduler"] = custom_scheduler
-
-# Execute plan
+# Execute plan manually (bypassing Portia plan execution to avoid unrelated query)
 try:
-    # Step 1: Prioritize (using LLM to validate)
-    prioritized = prioritize_requests(requests)  # Mock LLM step
+    # Step 1: Prioritize (mock LLM step)
+    prioritized = prioritize_requests(requests)
     print("Prioritized Requests:", prioritized)
 
     # Step 2: Schedule
