@@ -17,7 +17,7 @@ The right shows the patient details and the left shows the chatbot
 
 ## Code
 We only need four file, to run this program:
-chatbot.py
-credentials.json
-ScheduleTool.py
+chatbot.py , 
+credentials.json , 
+ScheduleTool.py ,
 .env
