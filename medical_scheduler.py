@@ -36,7 +36,7 @@ tool_registry = InMemoryToolRegistry()
 
 # Mock patient requests
 requests = [
-    {"patient": "John Doe", "condition": "chest pain", "urgency": "urgent", "email": "john@example.com", "timestamp": "2025-04-12T08:00:00"},
+    {"patient": "John Doe", "condition": "chest pain", "urgency": "urgent", "email": "jimstse@gmail.com", "timestamp": "2025-04-12T08:00:00"},
     {"patient": "Jane Smith", "condition": "annual checkup", "urgency": "routine", "email": "jane@example.com", "timestamp": "2025-04-12T08:05:00"},
     {"patient": "Bob Lee", "condition": "diabetes follow-up", "urgency": "moderate", "email": "bob@example.com", "timestamp": "2025-04-12T08:10:00"}
 ]
