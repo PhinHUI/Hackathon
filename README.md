@@ -1,3 +1,16 @@
 # Hackathon
 
+## Introduction
 This cutting-edge technology leverages Portia AI's technologies. It is the best tool to apply in the medical field. First, our product enabled the patient to schedule an online appointment. The system will prioritise the patient based on the  situation of each patient.
+
+## How to use
+0. Ensure you have python 3.11 or higher installed.
+1. Run the chatbot.py file
+
+A window should open and looks like this:
+
+![img.png](images/img.png)
+The right shows the patient details and the left shows the chatbot
+
+2. On the left, you can tell the chatbot to schedule appointments or send email to the patients about their appointments
+3. Appointments could be easily scheduled and sent
