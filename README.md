@@ -14,3 +14,10 @@ The right shows the patient details and the left shows the chatbot
 
 2. On the left, you can tell the chatbot to schedule appointments , prioritize, send email to the patients about their appointments and add requests from new patients.
 3. Appointments could be easily scheduled and sent
+
+## Code
+We only need four file, to run this program:
+chatbot.py
+credentials.json
+ScheduleTool.py
+.env
