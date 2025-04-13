@@ -1,5 +1,6 @@
 import os
 import datetime
+import uuid
 from dotenv import load_dotenv
 from portia import (
     Config,
@@ -7,17 +8,16 @@ from portia import (
     LLMProvider,
     Portia,
     InMemoryToolRegistry,
-    Tool,
+    ToolRunContext,
 )
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-
+from portia.errors import ToolHardError, ToolSoftError
 from ScheduleTool import ScheduleTool
+from EmailTool import EmailTool
 
 # Load environment variables
 load_dotenv()
 
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Verify API keys
 assert GOOGLE_API_KEY, "GOOGLE_API_KEY is not set"
@@ -30,9 +30,6 @@ google_config = Config.from_default(
     llm_model_name=LLMModel.GEMINI_2_0_FLASH,
     google_api_key=GOOGLE_API_KEY
 )
-
-# Initialize tool registry
-tool_registry = InMemoryToolRegistry()
 
 # Mock patient requests
 requests = [
@@ -48,119 +45,90 @@ def prioritize_requests(requests):
         req["score"] = urgency_scores.get(req["urgency"], 1)
     return sorted(requests, key=lambda x: (x["score"], x["timestamp"]), reverse=True)
 
-# Mock calendar
-calendar_slots = []
-def schedule_appointment(patient, urgency, condition):
-    now = datetime.datetime.now()
-    if urgency == "urgent":
-        start_time = now + datetime.timedelta(hours=1)
-    elif urgency == "moderate":
-        start_time = now + datetime.timedelta(days=1)
-    else:
-        start_time = now + datetime.timedelta(days=3)
-    slot = {
-        "patient": patient,
-        "condition": condition,
-        "start_time": start_time.isoformat(),
-        "end_time": (start_time + datetime.timedelta(minutes=30)).isoformat()
-    }
-    calendar_slots.append(slot)
-    return slot
+# Initialize tools
+schedule_tool = ScheduleTool()
+email_tool = EmailTool()
 
-# Google Calendar API setup
-def get_calendar_service():
-    flow = InstalledAppFlow.from_client_secrets_file(
-        os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-        scopes=["https://www.googleapis.com/auth/calendar"]
-    )
-    creds = flow.run_local_server(port=0)
-    return build("calendar", "v3", credentials=creds)
-
-# Mock email function
-def send_email(to, subject, body):
-    print(f"Mock email sent to {to}: Subject: {subject}, Body: {body}")
-    return {"status": "sent"}
-
-# Custom scheduler tool
-def custom_scheduler(requests):
-    prioritized = prioritize_requests(requests)
-    appointments = []
-    for req in prioritized:
-        slot = schedule_appointment(req["patient"], req["urgency"], req["condition"])
-        appointments.append({
-            "patient": req["patient"],
-            "email": req["email"],
-            "slot": slot
-        })
-    return appointments
-
-tool = ScheduleTool()
-# Register custom tool
-tool_registry.register_tool(tool)
+# Initialize tool registry
+tool_registry = InMemoryToolRegistry()
+tool_registry.register_tool(schedule_tool)
+tool_registry.register_tool(email_tool)
 
 # Initialize Portia
 portia = Portia(config=google_config, tools=tool_registry)
 
-# Plan to summarize and schedule
-plan = {
-    "steps": [
-        {
-            "task": "Prioritize patient appointment requests based on urgency.",
-            "inputs": [
-                {
-                    "name": "$requests",
-                    "value": requests,
-                    "description": "List of patient appointment requests."
-                }
-            ],
-            "tool_id": "llm_tool",
-            "output": "$prioritized_requests",
-            "description": "Use LLM to confirm urgency scores align with medical context."
-        },
-        {
-            "task": "Schedule appointments for prioritized patients.",
-            "inputs": [
-                {
-                    "name": "$prioritized_requests",
-                    "description": "Prioritized list of appointment requests."
-                }
-            ],
-            "tool_id": "custom_scheduler",
-            "output": "$scheduled_appointments",
-            "description": "Assign calendar slots based on urgency."
-        },
-        {
-            "task": "Email patients their appointment confirmations.",
-            "inputs": [
-                {
-                    "name": "$scheduled_appointments",
-                    "description": "List of scheduled appointments."
-                }
-            ],
-            "tool_id": "portia:google:gmail:send_email",
-            "output": "$email_confirmations",
-            "description": "Send confirmation emails to patients."
-        }
-    ]
-}
+# Process appointments
+def process_appointments(requests):
+    prioritized = prioritize_requests(requests)
+    appointments = []
+    # Initialize ToolRunContext with a valid plan_run_id prefixed with "prun-"
+    context = ToolRunContext(
+        execution_context={"user": "system", "session": "default"},
+        plan_run_id=f"prun-{uuid.uuid4()}",  # Prepend "prun-" to the UUID
+        config=google_config,
+        clarifications=[]
+    )
 
-# Execute plan manually (bypassing Portia plan execution to avoid unrelated query)
+    for req in prioritized:
+        try:
+            # Determine appointment date based on urgency
+            now = datetime.datetime.now()
+            if req["urgency"] == "urgent":
+                appt_date = (now + datetime.timedelta(hours=1)).strftime("%Y-%m-%d")
+            elif req["urgency"] == "moderate":
+                appt_date = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                appt_date = (now + datetime.timedelta(days=3)).strftime("%Y-%m-%d")
+
+            # Schedule using ScheduleTool
+            schedule_result = schedule_tool.run(context, appt_date)
+            slot = {
+                "patient": req["patient"],
+                "condition": req["condition"],
+                "start_time": f"{appt_date}T10:00:00",
+                "end_time": f"{appt_date}T11:00:00",
+                "event_id": schedule_result.split("Event ID: ")[1]
+            }
+
+            # Send email using EmailTool
+            email_body = (
+                f"Dear {req['patient']},\n"
+                f"Your appointment is scheduled for {slot['start_time']}.\n"
+                f"Reason: {req['condition']}\n"
+                f"Best regards,\nYour Clinic"
+            )
+            email_result = email_tool.run(context, req["email"])
+
+            appointments.append({
+                "patient": req["patient"],
+                "email": req["email"],
+                "slot": slot,
+                "email_status": email_result
+            })
+
+        except ToolHardError as e:
+            print(f"Critical error for {req['patient']}: {e}")
+            continue
+        except ToolSoftError as e:
+            print(f"Recoverable error for {req['patient']}: {e}")
+            continue
+        except Exception as e:
+            print(f"Unexpected error for {req['patient']}: {e}")
+            continue
+
+    return appointments
+
+# Execute
 try:
-    # Step 1: Prioritize (mock LLM step)
+    # Step 1: Prioritize
+    print("Prioritizing requests...")
     prioritized = prioritize_requests(requests)
     print("Prioritized Requests:", prioritized)
 
-    # Step 2: Schedule
-    appointments = custom_scheduler(prioritized)
+    # Step 2: Process appointments (schedule and email)
+    print("Scheduling and emailing...")
+    appointments = process_appointments(prioritized)
     print("Scheduled Appointments:", appointments)
-
-    # Step 3: Email
-    confirmations = []
-    for appt in appointments:
-        body = f"Dear {appt['patient']},\nYour appointment is scheduled for {appt['slot']['start_time']}.\nReason: {appt['slot']['condition']}"
-        result = send_email(appt["email"], "Appointment Confirmation", body)
-        confirmations.append(result)
-    print("Email Confirmations:", confirmations)
 
 except Exception as e:
     print(f"Error: {e}")
